@@ -4816,6 +4816,19 @@ fu_plugin_composite_func(gconstpointer user_data)
 	    "    <release version=\"1.2.3\"/>\n"
 	    "  </releases>\n"
 	    "</component>",
+	    "acme.module0.metainfo.xml",
+	    "<component type=\"firmware\">\n"
+	    "  <id>com.acme.example.firmware.module0</id>\n"
+	    "  <provides>\n"
+	    "    <firmware type=\"flashed\">3491bb9d-53f8-5ccf-8420-3a948dccb98f</firmware>\n"
+	    "  </provides>\n"
+	    "  <releases>\n"
+	    "    <release version=\"21\"/>\n"
+	    "  </releases>\n"
+	    "  <custom>\n"
+	    "    <value key=\"LVFS::VersionFormat\">plain</value>\n"
+	    "  </custom>\n"
+	    "</component>",
 	    "acme.module1.metainfo.xml",
 	    "<component type=\"firmware\">\n"
 	    "  <id>com.acme.example.firmware.module1</id>\n"
@@ -4855,7 +4868,7 @@ fu_plugin_composite_func(gconstpointer user_data)
 	components = fu_cabinet_get_components(cabinet, &error);
 	g_assert_no_error(error);
 	g_assert_nonnull(components);
-	g_assert_cmpint(components->len, ==, 3);
+	g_assert_cmpint(components->len, ==, 4);
 
 	/* set up dummy plugin */
 	ret = fu_plugin_reset_config_values(plugin, &error);
@@ -4880,13 +4893,17 @@ fu_plugin_composite_func(gconstpointer user_data)
 	g_assert_true(ret);
 
 	/* check we found all composite devices  */
-	g_assert_cmpint(devices->len, ==, 3);
+	g_assert_cmpint(devices->len, ==, 4);
 	for (guint i = 0; i < devices->len; i++) {
 		FuDevice *device = g_ptr_array_index(devices, i);
 		fu_engine_add_device(engine, device);
 		if (g_strcmp0(fu_device_get_id(device),
 			      "08d460be0f1f9f128413f816022a6439e0078018") == 0) {
 			g_assert_cmpstr(fu_device_get_version(device), ==, "1.2.2");
+		} else if (g_strcmp0(fu_device_get_id(device),
+				     "26edae923b2b15fef3739fc951d186ea53c85ccf") == 0) {
+			g_assert_cmpstr(fu_device_get_version(device), ==, "20");
+			g_assert_nonnull(fu_device_get_parent(device));
 		} else if (g_strcmp0(fu_device_get_id(device),
 				     "c0a0a4aa6480ac28eea1ce164fbb466ca934e1ff") == 0) {
 			g_assert_cmpstr(fu_device_get_version(device), ==, "1");
@@ -4927,15 +4944,17 @@ fu_plugin_composite_func(gconstpointer user_data)
 			g_ptr_array_add(releases, g_steal_pointer(&release));
 		}
 	}
-	g_assert_cmpint(releases->len, ==, 3);
+	g_assert_cmpint(releases->len, ==, 4);
 
 	/* sort these by version, forcing fu_engine_install_releases() to sort by device order */
 	g_ptr_array_sort(releases, fu_plugin_composite_release_sort_cb);
 	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 0)));
-	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child1");
+	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child0");
 	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 1)));
-	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child2");
+	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child1");
 	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 2)));
+	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child2");
+	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 3)));
 	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, NULL);
 
 	/* install the cab */
@@ -4956,14 +4975,19 @@ fu_plugin_composite_func(gconstpointer user_data)
 	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child2");
 	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 2)));
 	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child1");
+	dev_tmp = fu_release_get_device(FU_RELEASE(g_ptr_array_index(releases, 3)));
+	g_assert_cmpstr(fu_device_get_logical_id(dev_tmp), ==, "child0");
 
-	/* verify everything upgraded */
+	/* verify everything upgraded except an intentional failure */
 	for (guint i = 0; i < devices->len; i++) {
 		FuDevice *device = g_ptr_array_index(devices, i);
 		const gchar *metadata;
 		if (g_strcmp0(fu_device_get_id(device),
 			      "08d460be0f1f9f128413f816022a6439e0078018") == 0) {
 			g_assert_cmpstr(fu_device_get_version(device), ==, "1.2.3");
+		} else if (g_strcmp0(fu_device_get_id(device),
+				     "26edae923b2b15fef3739fc951d186ea53c85ccf") == 0) {
+			g_assert_cmpstr(fu_device_get_version(device), ==, "20");
 		} else if (g_strcmp0(fu_device_get_id(device),
 				     "c0a0a4aa6480ac28eea1ce164fbb466ca934e1ff") == 0) {
 			g_assert_cmpstr(fu_device_get_version(device), ==, "2");

@@ -52,8 +52,25 @@ fu_test_plugin_coldplug(FuPlugin *plugin, FuProgress *progress, GError **error)
 	fu_plugin_device_add(plugin, device);
 
 	if (fu_plugin_get_config_value_boolean(plugin, "CompositeChild")) {
+		g_autoptr(FuDevice) child0 = NULL;
 		g_autoptr(FuDevice) child1 = NULL;
 		g_autoptr(FuDevice) child2 = NULL;
+
+		child0 = fu_device_new(ctx);
+		fu_device_build_vendor_id_u16(child0, "USB", 0xFFFF);
+		fu_device_add_protocol(child0, "com.acme");
+		fu_device_set_physical_id(child0, "fake");
+		fu_device_set_logical_id(child0, "child0");
+		fu_device_add_guid(child0, "3491bb9d-53f8-5ccf-8420-3a948dccb98f");
+		fu_device_set_name(child0, "Module0");
+		fu_device_set_version_format(child0, FWUPD_VERSION_FORMAT_PLAIN);
+		fu_device_set_version(child0, "20");
+		fu_device_add_parent_guid(child0, "b585990a-003e-5270-89d5-3705a17f9a43");
+		fu_device_add_flag(child0, FWUPD_DEVICE_FLAG_UPDATABLE);
+		fu_device_add_flag(child0, FWUPD_DEVICE_FLAG_UNSIGNED_PAYLOAD);
+		fu_device_add_private_flag(child0, FU_DEVICE_PRIVATE_FLAG_INSTALL_PARENT_FIRST);
+		fu_device_add_private_flag(child0, FU_DEVICE_PRIVATE_FLAG_COMPOSITE_ERROR_CONTINUE);
+		fu_plugin_device_add(plugin, child0);
 
 		child1 = fu_device_new(ctx);
 		fu_device_build_vendor_id_u16(child1, "USB", 0xFFFF);
@@ -285,6 +302,13 @@ fu_test_plugin_write_firmware(FuPlugin *plugin,
 	/* composite test, upgrade composite devices */
 	if (fu_plugin_get_config_value_boolean(plugin, "CompositeChild")) {
 		fu_device_set_version_format(device, FWUPD_VERSION_FORMAT_PLAIN);
+		if (g_strcmp0(fu_device_get_logical_id(device), "child0") == 0) {
+			g_set_error_literal(error,
+					    FWUPD_ERROR,
+					    FWUPD_ERROR_INTERNAL,
+					    "failed composite update intentionally");
+			return FALSE;
+		}
 		if (g_strcmp0(fu_device_get_logical_id(device), "child1") == 0) {
 			fu_device_set_version(device, "2");
 			return TRUE;
