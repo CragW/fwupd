@@ -261,7 +261,10 @@ fu_dell_kestrel_hid_device_write_firmware_pages(FuDellKestrelHidDevice *self,
 				fu_progress_step_done(progress);
 				continue;
 			}
-			g_propagate_error(error, g_steal_pointer(&error_local));
+			g_propagate_prefixed_error(error,
+						   g_steal_pointer(&error_local),
+						   "%s failed to write page: ",
+						   fu_device_get_name(FU_DEVICE(self)));
 			return FALSE;
 		}
 
@@ -397,7 +400,8 @@ fu_dell_kestrel_hid_device_write_firmware(FuDellKestrelHidDevice *self,
 			g_set_error(error,
 				    FWUPD_ERROR,
 				    FWUPD_ERROR_WRITE,
-				    "failed to write chunk[%u]: %s",
+				    "%s failed to write chunk[%u]: %s",
+				    fu_device_get_name(FU_DEVICE(self)),
 				    i,
 				    fu_dell_kestrel_hid_ec_chunk_response_to_string(resp));
 			return FALSE;
