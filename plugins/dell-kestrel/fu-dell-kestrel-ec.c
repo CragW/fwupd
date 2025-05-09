@@ -73,6 +73,14 @@ fu_dell_kestrel_ec_is_dev_present(FuDellKestrelEc *self,
 	return dev_entry != NULL;
 }
 
+gboolean
+fu_dell_kestrel_ec_is_pd_chunk_supported(FuDevice *device)
+{
+	return (fu_version_compare(fu_device_get_version(device),
+				   "90.0.32.0",
+				   fu_device_get_version_format(device)) >= 0);
+}
+
 const gchar *
 fu_dell_kestrel_ec_devicetype_to_str(FuDellKestrelEcDevType dev_type,
 				     FuDellKestrelEcDevSubtype subtype,
