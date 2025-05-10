@@ -413,9 +413,19 @@ fu_dell_kestrel_ec_is_dock_ready4update(FuDevice *device, GError **error)
 	return TRUE;
 }
 
+static gboolean
+fu_dell_kestrel_ec_is_new_ownership_cmd(FuDellKestrelEc *self)
+{
+	FuDevice *device = FU_DEVICE(self);
+	return (fu_version_compare(fu_device_get_version(device),
+				   "01.00.05.01",
+				   fu_device_get_version_format(device)) > 0);
+}
+
 gboolean
 fu_dell_kestrel_ec_own_dock(FuDellKestrelEc *self, gboolean lock, GError **error)
 {
+	guint16 bitmask = 0x0;
 	g_autoptr(GByteArray) req = g_byte_array_new();
 	g_autoptr(GError) error_local = NULL;
 	g_autofree gchar *msg = NULL;
@@ -425,11 +435,12 @@ fu_dell_kestrel_ec_own_dock(FuDellKestrelEc *self, gboolean lock, GError **error
 
 	if (lock) {
 		msg = g_strdup("own the dock");
-		fu_byte_array_append_uint16(req, 0xFFFF, G_LITTLE_ENDIAN);
+		bitmask = fu_dell_kestrel_ec_is_new_ownership_cmd(self) ? 0x10CC : 0xFFFF;
 	} else {
 		msg = g_strdup("relesae the dock");
-		fu_byte_array_append_uint16(req, 0x0000, G_LITTLE_ENDIAN);
+		bitmask = fu_dell_kestrel_ec_is_new_ownership_cmd(self) ? 0xC001 : 0x0000;
 	}
+	fu_byte_array_append_uint16(req, bitmask, G_LITTLE_ENDIAN);
 
 	fu_device_sleep(FU_DEVICE(self), 1000);
 	if (!fu_dell_kestrel_ec_write(self, req, &error_local)) {
