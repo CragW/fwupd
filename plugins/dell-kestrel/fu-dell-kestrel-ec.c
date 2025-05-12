@@ -417,9 +417,13 @@ static gboolean
 fu_dell_kestrel_ec_is_new_ownership_cmd(FuDellKestrelEc *self)
 {
 	FuDevice *device = FU_DEVICE(self);
-	return (fu_version_compare(fu_device_get_version(device),
-				   "01.00.05.01",
-				   fu_device_get_version_format(device)) > 0);
+	const gchar *version = fu_device_get_version(device);
+	FwupdVersionFormat fmt = fu_device_get_version_format(device);
+
+	if (fu_version_compare(version, "01.00.00.00", fmt) >= 0)
+		return (fu_version_compare(version, "01.00.05.02", fmt) >= 0);
+
+	return (fu_version_compare(version, "00.00.34.00", fmt) >= 0);
 }
 
 gboolean
