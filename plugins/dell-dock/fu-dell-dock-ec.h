@@ -28,12 +28,11 @@ fu_dell_dock_ec_get_module_type(FuDellDockEc *self);
 gboolean
 fu_dell_dock_ec_needs_tbt(FuDellDockEc *self);
 gboolean
-fu_dell_dock_ec_tbt_passive(FuDellDockEc *self);
-gboolean
 fu_dell_dock_ec_modify_lock(FuDellDockEc *self, guint8 target, gboolean unlocked, GError **error);
-
+void
+fu_dell_dock_ec_passive_add_tbt(FuDellDockEc *self);
 gboolean
-fu_dell_dock_ec_reboot_dock(FuDellDockEc *self, GError **error);
+fu_dell_dock_ec_passive_add_reboot(FuDellDockEc *self, GError **error);
 
 const gchar *
 fu_dell_dock_ec_get_mst_version(FuDellDockEc *self);

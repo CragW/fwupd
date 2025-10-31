@@ -22,11 +22,32 @@
 #include "fu-dell-dock-status.h"
 #include "fu-dell-dock-tbt.h"
 
+/* plugin config */
+#define FWUPD_DELL_DOCK_PLUGIN_CONFIG_UOD "UpdateOnDisconnect"
+
 struct _FuDellDockPlugin {
 	FuPlugin parent_instance;
 };
 
 G_DEFINE_TYPE(FuDellDockPlugin, fu_dell_dock_plugin, FU_TYPE_PLUGIN)
+
+static gboolean
+fu_dell_dock_plugin_modify_config(FuPlugin *plugin,
+				  const gchar *key,
+				  const gchar *value,
+				  GError **error)
+{
+	const gchar *keys[] = {FWUPD_DELL_DOCK_PLUGIN_CONFIG_UOD, NULL};
+	if (!g_strv_contains(keys, key)) {
+		g_set_error(error,
+			    FWUPD_ERROR,
+			    FWUPD_ERROR_NOT_SUPPORTED,
+			    "config key %s not supported",
+			    key);
+		return FALSE;
+	}
+	return fu_plugin_set_config_value(plugin, key, value, error);
+}
 
 static gboolean
 fu_dell_dock_plugin_create_node(FuPlugin *plugin, FuDevice *device, GError **error)
@@ -171,38 +192,12 @@ fu_dell_dock_plugin_backend_device_added(FuPlugin *plugin,
 }
 
 static void
-fu_dell_dock_plugin_separate_activation(FuPlugin *plugin)
-{
-	FuDevice *device_ec = fu_plugin_cache_lookup(plugin, "ec");
-	FuDevice *device_usb4 = fu_plugin_cache_lookup(plugin, "usb4");
-
-	/* both usb4 and ec device are found */
-	if (device_usb4 && device_ec) {
-		if (fu_device_has_flag(device_usb4, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION) &&
-		    fu_device_has_flag(device_ec, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION)) {
-			fu_device_remove_flag(FU_DEVICE(device_ec),
-					      FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION);
-			g_info("activate for %s is inhibited by %s",
-			       fu_device_get_name(device_ec),
-			       fu_device_get_name(device_usb4));
-		}
-	}
-}
-
-static void
 fu_dell_dock_plugin_device_registered(FuPlugin *plugin, FuDevice *device)
 {
 	/* dell dock delays the activation so skips device restart */
-	if (fu_device_has_guid(device, DELL_DOCK_TBT_INSTANCE_ID)) {
+	if (fu_device_has_guid(device, DELL_DOCK_TBT_INSTANCE_ID) ||
+	    fu_device_has_guid(device, DELL_DOCK_USB4_INSTANCE_ID))
 		fu_device_add_private_flag(device, FU_DEVICE_PRIVATE_FLAG_SKIPS_RESTART);
-		fu_plugin_cache_add(plugin, "tbt", device);
-	}
-	if (fu_device_has_guid(device, DELL_DOCK_USB4_INSTANCE_ID)) {
-		fu_device_add_private_flag(device, FU_DEVICE_PRIVATE_FLAG_SKIPS_RESTART);
-		fu_plugin_cache_add(plugin, "usb4", device);
-	}
-	if (FU_IS_DELL_DOCK_EC(device))
-		fu_plugin_cache_add(plugin, "ec", device);
 
 	/* usb4 device from thunderbolt plugin */
 	if (g_strcmp0(fu_device_get_plugin(device), "thunderbolt") == 0 &&
@@ -213,15 +208,22 @@ fu_dell_dock_plugin_device_registered(FuPlugin *plugin, FuDevice *device)
 		fu_device_inhibit(device, "hidden", msg);
 		return;
 	}
-
-	/* online activation is mutually exclusive between usb4 and ec */
-	fu_dell_dock_plugin_separate_activation(plugin);
 }
 
 static gboolean
 fu_dell_dock_plugin_backend_device_removed(FuPlugin *plugin, FuDevice *device, GError **error)
 {
-	FuDevice *parent;
+	/* drop needs-activation flag */
+	if (FU_IS_DELL_DOCK_EC(device)) {
+		g_autoptr(GPtrArray) children = fu_device_get_children(device);
+
+		for (guint i = 0; i < children->len; i++) {
+			FuDevice *dev = g_ptr_array_index(children, i);
+
+			fu_device_remove_flag(dev, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION);
+			g_debug("dropped needs-activation flag: %s", fu_device_get_name(dev));
+		}
+	}
 
 	if (!FU_IS_USB_DEVICE(device))
 		return TRUE;
@@ -232,23 +234,18 @@ fu_dell_dock_plugin_backend_device_removed(FuPlugin *plugin, FuDevice *device, G
 		g_debug("dropped needs-activation flag: %s", fu_device_get_name(device));
 	}
 
-	parent = fu_device_get_parent(device);
-	if (parent == NULL)
+	/* thunderbolt device may be removed for activation on connected */
+	if (fu_device_has_guid(device, DELL_DOCK_TBT_INSTANCE_ID) ||
+	    fu_device_has_guid(device, DELL_DOCK_USB4_INSTANCE_ID))
 		return TRUE;
 
-	/* remove the dock device tree */
-	if (FU_IS_DELL_DOCK_EC(parent)) {
-		g_autofree gchar *id_display = fu_device_get_id_display(parent);
+	/* RTS5485 should notify ec root to destroy the tree */
+	if (fu_device_has_private_flag(device, FU_DELL_DOCK_HUB_FLAG_HAS_BRIDGE)) {
+		FuDevice *parent = fu_device_get_parent(device);
 
-		/* device will be activated on disconnected */
-		if (fu_device_has_flag(parent, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION)) {
-			fu_device_remove_flag(parent, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION);
-			g_debug("dropped needs-activation flag: %s", id_display);
-		}
-
-		/* remove parent */
 		fu_plugin_device_remove(plugin, parent);
-		g_debug("removed device: %s", id_display);
+		g_debug("notifying root ec to destroy the tree");
+		return TRUE;
 	}
 
 	return TRUE;
@@ -272,50 +269,49 @@ static gboolean
 fu_dell_dock_plugin_composite_cleanup(FuPlugin *plugin, GPtrArray *devices, GError **error)
 {
 	FuDellDockEc *parent = fu_dell_dock_plugin_get_ec(devices);
-	FuDevice *dev = NULL;
+	g_autoptr(FuProgress) progress = fu_progress_new(G_STRLOC);
 	g_autoptr(FuDeviceLocker) locker = NULL;
-	gboolean needs_activation = FALSE;
 
+	/* no ec found */
 	if (parent == NULL)
 		return TRUE;
-
-	/* if thunderbolt is in the transaction it needs to be activated separately */
-	for (guint i = 0; i < devices->len; i++) {
-		dev = g_ptr_array_index(devices, i);
-		if ((g_strcmp0(fu_device_get_plugin(dev), "thunderbolt") == 0 ||
-		     g_strcmp0(fu_device_get_plugin(dev), "intel_usb4") == 0 ||
-		     g_strcmp0(fu_device_get_plugin(dev), "dell_dock") == 0) &&
-		    fu_device_has_flag(dev, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION)) {
-			/* the kernel and/or thunderbolt plugin have been configured to let HW
-			 * finish the update */
-			if (fu_device_has_flag(dev, FWUPD_DEVICE_FLAG_USABLE_DURING_UPDATE)) {
-				fu_dell_dock_ec_tbt_passive(parent);
-				/* run the update immediately - no kernel support */
-			} else {
-				needs_activation = TRUE;
-				break;
-			}
-		}
-	}
-	/* separate activation flag between usb4 and ec device */
-	fu_dell_dock_plugin_separate_activation(plugin);
 
 	locker = fu_device_locker_new(FU_DEVICE(parent), error);
 	if (locker == NULL)
 		return FALSE;
 
-	if (!fu_dell_dock_ec_reboot_dock(parent, error))
+	fu_dell_dock_ec_passive_add_tbt(parent);
+	if (!fu_dell_dock_ec_passive_add_reboot(parent, error))
 		return FALSE;
 
-	/* close this first so we don't have an error from the thunderbolt activation */
-	if (!fu_device_locker_close(locker, error))
-		return FALSE;
-
-	if (needs_activation && dev != NULL) {
-		g_autoptr(FuProgress) progress = fu_progress_new(G_STRLOC);
-		if (!fu_device_activate(dev, progress, error))
-			return FALSE;
+	/* update on disconnected -> register the passive flow and leave */
+	if (fu_plugin_get_config_value_boolean(plugin, FWUPD_DELL_DOCK_PLUGIN_CONFIG_UOD)) {
+		g_debug("dock passive flow registered, the firmware updates will be activated on "
+			"disconnected");
+		return TRUE;
 	}
+
+	/* update on connected -> activate the updates immediately */
+	for (guint i = 0; i < devices->len; i++) {
+		g_autoptr(FuDevice) dev = g_ptr_array_index(devices, i);
+
+		/* dell dock delays the activation so skips device restart */
+		if (!fu_device_has_guid(dev, DELL_DOCK_TBT_INSTANCE_ID) &&
+		    !fu_device_has_guid(dev, DELL_DOCK_USB4_INSTANCE_ID))
+			continue;
+
+		/* activate the thunderbolt device now */
+		if (fu_device_has_flag(dev, FWUPD_DEVICE_FLAG_NEEDS_ACTIVATION)) {
+			g_debug("activating device: %s", fu_device_get_id_display(dev));
+			if (!fu_device_activate(dev, progress, error))
+				return FALSE;
+		}
+	}
+
+	/* activate the ec and sub-components */
+	g_debug("activating device: %s", fu_device_get_id_display(FU_DEVICE(parent)));
+	if (!fu_device_activate(FU_DEVICE(parent), progress, error))
+		return FALSE;
 
 	return TRUE;
 }
@@ -342,6 +338,7 @@ fu_dell_dock_plugin_constructed(GObject *obj)
 	fu_context_add_quirk_key(ctx, "DellDockVersionLowest");
 
 	fu_plugin_add_udev_subsystem(plugin, "usb");
+	fu_plugin_set_config_default(plugin, FWUPD_DELL_DOCK_PLUGIN_CONFIG_UOD, "false");
 
 	/* allow these to be built by quirks */
 	fu_plugin_add_device_gtype(plugin, FU_TYPE_DELL_DOCK_STATUS);
@@ -367,4 +364,5 @@ fu_dell_dock_plugin_class_init(FuDellDockPluginClass *klass)
 	plugin_class->backend_device_removed = fu_dell_dock_plugin_backend_device_removed;
 	plugin_class->composite_cleanup = fu_dell_dock_plugin_composite_cleanup;
 	plugin_class->composite_prepare = fu_dell_dock_plugin_composite_prepare;
+	plugin_class->modify_config = fu_dell_dock_plugin_modify_config;
 }

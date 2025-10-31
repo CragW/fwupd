@@ -124,17 +124,7 @@ fu_dell_dock_tbt_write_fw(FuDevice *device,
 		fu_progress_set_percentage_full(progress, i, image_size);
 	}
 	g_debug("writing took %f seconds", g_timer_elapsed(timer, NULL));
-
 	fu_progress_set_status(progress, FWUPD_STATUS_DEVICE_BUSY);
-
-	if (fu_dell_dock_ec_tbt_passive(FU_DELL_DOCK_EC(fu_device_get_parent(device)))) {
-		g_info("using passive flow for Thunderbolt");
-	} else if (!fu_dell_dock_hid_tbt_authenticate(fu_device_get_proxy(device),
-						      &tbt_base_settings,
-						      error)) {
-		g_prefix_error_literal(error, "failed to authenticate: ");
-		return FALSE;
-	}
 
 	/* dock will reboot to re-read; this is to appease the daemon */
 	fu_device_set_version_format(device, FWUPD_VERSION_FORMAT_PAIR);

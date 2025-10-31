@@ -221,14 +221,10 @@ fu_dell_dock_ec_needs_tbt(FuDellDockEc *self)
 	return !port0_tbt_mode;
 }
 
-gboolean
-fu_dell_dock_ec_tbt_passive(FuDellDockEc *self)
+void
+fu_dell_dock_ec_passive_add_tbt(FuDellDockEc *self)
 {
-	if (self->passive_flow > 0) {
-		self->passive_flow |= PASSIVE_TBT_MASK;
-		return TRUE;
-	}
-	return FALSE;
+	self->passive_flow |= PASSIVE_TBT_MASK;
 }
 
 static const gchar *
@@ -663,7 +659,7 @@ fu_dell_dock_ec_activate(FuDevice *device, FuProgress *progress, GError **error)
 }
 
 gboolean
-fu_dell_dock_ec_reboot_dock(FuDellDockEc *self, GError **error)
+fu_dell_dock_ec_passive_add_reboot(FuDellDockEc *self, GError **error)
 {
 	guint32 cmd = EC_CMD_PASSIVE | /* cmd */
 		      1 << 8 |	       /* length of data arguments */
